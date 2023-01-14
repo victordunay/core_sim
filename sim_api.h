@@ -14,8 +14,6 @@ extern "C" {
 #include <string.h>
 #include <assert.h>
 
-
-
 /*********************************************/
 /* The memory simulator API                  */
 /*********************************************/
