@@ -3,6 +3,7 @@
 #include "core_api.h"
 #include "sim_api.h"
 #include <stdio.h>
+#include <unistd.h>
 
 #define NUM_OF_REGISTERS (8)
 #define MAX_NUM_OF_INSTRUCTIONS (100)
@@ -67,21 +68,25 @@ public:
     {
       Instruction current_instruction = instuctions_table[num_of_executed_instructions];
       int32_t memory_address = 0;
-
       switch (current_instruction.opcode) 
       { 
         case CMD_NOP:
           break;
-        case CMD_SUB:
         case CMD_SUBI:
+          registers_table.reg[current_instruction.dst_index] = registers_table.reg[current_instruction.src1_index] - current_instruction.src2_index_imm;
+          break;
+        case CMD_SUB:
           registers_table.reg[current_instruction.dst_index] = registers_table.reg[current_instruction.src1_index] - registers_table.reg[current_instruction.src2_index_imm];
           break;
         case CMD_ADDI:
+          registers_table.reg[current_instruction.dst_index] = registers_table.reg[current_instruction.src1_index] + current_instruction.src2_index_imm;
+          break;
         case CMD_ADD:
           registers_table.reg[current_instruction.dst_index] = registers_table.reg[current_instruction.src1_index] + registers_table.reg[current_instruction.src2_index_imm];
+          break;
         case CMD_LOAD:
           memory_address = current_instruction.src1_index + current_instruction.src2_index_imm;
-          SIM_MemDataRead(memory_address, &current_instruction.dst_index);
+          SIM_MemDataRead(memory_address, &registers_table.reg[current_instruction.dst_index]);
           state = BUSY;
           remained_cycles_at_busy_state += load_latency;
           break;
@@ -95,7 +100,7 @@ public:
           state = DONE;
           break;
       }
-
+      num_of_executed_instructions++;
     }
     ~Thread() {};
 };
@@ -113,7 +118,7 @@ public:
     configuration_t configuration;
     unsigned thread_index_for_execute;
     unsigned previous_executed_thread_index;
-    bool firt_execution;
+    bool first_execution;
     ThreadsTable(configuration_t configuration)
     {
       this->load_latency = SIM_GetLoadLat();
@@ -123,29 +128,32 @@ public:
       this->configuration = configuration;
       this->thread_index_for_execute = 0;
       this->program_done = false;
-      this->firt_execution = true;
-      this->previous_executed_thread_index = -1;
+      this->first_execution = true;
+      this->previous_executed_thread_index = 0;
       threads = new Thread[num_of_threads];
       initialize_threads_parameters();
-      display_registers_table(0);
-      display_registers_table(1);
-      display_registers_table(2);
-
     }
 
     void execute_program(void)
     {
+      bool found_thread_for_execution = false;
       unsigned thread_index_for_execute = 0;
       while(!program_done)
       {    
-        get_thread_index_for_execution(&thread_index_for_execute);
-        execute_instruction(thread_index_for_execute);
+        get_thread_index_for_execution(&thread_index_for_execute, &found_thread_for_execution);
+        
+        if (found_thread_for_execution)
+        {
+          execute_instruction(thread_index_for_execute);
+        }
+        
         update_threads_state();
         is_program_done(&program_done);
       }
+      
     }
 
-    void execute_instruction(unsigned execute_single_thread_instruction)
+    void execute_instruction(unsigned thread_index_for_execute)
     {
       threads[thread_index_for_execute].execute_instruction();
     }
@@ -165,15 +173,16 @@ public:
       }
     }
 
-    void get_thread_index_for_execution(unsigned * thread_index_for_execute)
+    void get_thread_index_for_execution(unsigned * thread_index_for_execute, bool * found_thread_for_execution)
     {
       unsigned candidate_thread_index = 0;
       unsigned num_of_searched_threads = 0;
-      bool found_thread_for_execution = false;
-
-      if (firt_execution)
+      *found_thread_for_execution = false;
+      if (first_execution)
       {
         *thread_index_for_execute = 0;
+        first_execution = false;
+        *found_thread_for_execution = true;
       }
       else if (FINE == configuration)
       {
@@ -183,16 +192,16 @@ public:
         {
           if (IDLE != threads[candidate_thread_index].state)
           {
-            candidate_thread_index = (previous_executed_thread_index + 1) % num_of_threads;
+            candidate_thread_index = (candidate_thread_index + 1) % num_of_threads;
           }
           else
           {
-            found_thread_for_execution = true;
+            *found_thread_for_execution = true;
             break;
           }
         }
         
-        if (found_thread_for_execution)
+        if (*found_thread_for_execution)
         {
           *thread_index_for_execute = candidate_thread_index;
           previous_executed_thread_index = candidate_thread_index;
@@ -226,7 +235,6 @@ public:
         threads[thread_index].update_num_of_instructions(num_of_thread_instructions);
         threads[thread_index].initialize_instructions_table();
         update_instruction_table((unsigned)thread_index, num_of_thread_instructions);
-        display_thread_instructions_table(thread_index, num_of_thread_instructions);
         threads[thread_index].initialize_latencies(load_latency, store_latency);
 
       }
@@ -284,12 +292,12 @@ public:
 
     ~ThreadsTable() {};
 };
+ThreadsTable * threads_table = NULL;
 
 void CORE_BlockedMT()
 {
-	ThreadsTable threads_table(FINE);
-
-
+  threads_table = new ThreadsTable(FINE);
+  threads_table->execute_program();
 }
 
 void CORE_FinegrainedMT() {
@@ -306,5 +314,13 @@ double CORE_FinegrainedMT_CPI(){
 void CORE_BlockedMT_CTX(tcontext* context, int threadid) {
 }
 
-void CORE_FinegrainedMT_CTX(tcontext* context, int threadid) {
+void CORE_FinegrainedMT_CTX(tcontext* context, int threadid) 
+{
+  unsigned register_index = 0;
+
+  for(register_index = 0; register_index < NUM_OF_REGISTERS; ++register_index)
+  {
+    context[threadid].reg[register_index] = threads_table->threads[threadid].registers_table.reg[register_index];
+  }
+  
 }
