@@ -88,13 +88,13 @@ public:
           memory_address = current_instruction.src1_index + current_instruction.src2_index_imm;
           SIM_MemDataRead(memory_address, &registers_table.reg[current_instruction.dst_index]);
           state = BUSY;
-          remained_cycles_at_busy_state += load_latency;
+          remained_cycles_at_busy_state += load_latency + 1;
           break;
         case CMD_STORE:
           memory_address = current_instruction.dst_index + current_instruction.src2_index_imm;
           SIM_MemDataWrite(memory_address, current_instruction.src1_index);
           state = BUSY;
-          remained_cycles_at_busy_state += store_latency;
+          remained_cycles_at_busy_state += store_latency + 1;
           break;
         case CMD_HALT:
           state = DONE;
@@ -119,6 +119,9 @@ public:
     unsigned thread_index_for_execute;
     unsigned previous_executed_thread_index;
     bool first_execution;
+    unsigned total_num_of_cycles;
+    unsigned total_num_of_instructions;
+
     ThreadsTable(configuration_t configuration)
     {
       this->load_latency = SIM_GetLoadLat();
@@ -129,6 +132,7 @@ public:
       this->thread_index_for_execute = 0;
       this->program_done = false;
       this->first_execution = true;
+      this->total_num_of_cycles = 0;
       this->previous_executed_thread_index = 0;
       threads = new Thread[num_of_threads];
       initialize_threads_parameters();
@@ -146,10 +150,13 @@ public:
         {
           execute_instruction(thread_index_for_execute);
         }
+    
         
         update_threads_state();
         is_program_done(&program_done);
+        total_num_of_cycles++;
       }
+
       
     }
 
@@ -158,6 +165,15 @@ public:
       threads[thread_index_for_execute].execute_instruction();
     }
 
+    void get_total_num_of_instructions( unsigned * get_total_num_of_instructions)
+    {
+      *get_total_num_of_instructions = 0;
+
+      for (unsigned thread_index = 0; thread_index < num_of_threads ; ++thread_index)
+      {
+        *get_total_num_of_instructions += threads[thread_index].num_of_executed_instructions;
+      }
+    }
     void update_threads_state(void)
     {
       for (unsigned thread_index = 0; thread_index < num_of_threads ; ++thread_index)
@@ -287,9 +303,6 @@ public:
       printf("\n\n");
     }
  
-
-
-
     ~ThreadsTable() {};
 };
 ThreadsTable * threads_table = NULL;
@@ -307,8 +320,19 @@ double CORE_BlockedMT_CPI(){
 	return 0;
 }
 
-double CORE_FinegrainedMT_CPI(){
-	return 0;
+double CORE_FinegrainedMT_CPI()
+{
+  unsigned total_num_of_instructions = 0;
+  double cycles_per_instruction = 0;
+
+  threads_table->get_total_num_of_instructions(&total_num_of_instructions);
+
+  if (0 != total_num_of_instructions)
+  {
+    cycles_per_instruction = (double)threads_table->total_num_of_cycles / total_num_of_instructions;
+  }
+
+	return cycles_per_instruction;
 }
 
 void CORE_BlockedMT_CTX(tcontext* context, int threadid) {
@@ -316,6 +340,7 @@ void CORE_BlockedMT_CTX(tcontext* context, int threadid) {
 
 void CORE_FinegrainedMT_CTX(tcontext* context, int threadid) 
 {
+
   unsigned register_index = 0;
 
   for(register_index = 0; register_index < NUM_OF_REGISTERS; ++register_index)
