@@ -85,14 +85,17 @@ public:
           registers_table.reg[current_instruction.dst_index] = registers_table.reg[current_instruction.src1_index] + registers_table.reg[current_instruction.src2_index_imm];
           break;
         case CMD_LOAD:
+    
           memory_address = current_instruction.src1_index + current_instruction.src2_index_imm;
           SIM_MemDataRead(memory_address, &registers_table.reg[current_instruction.dst_index]);
           state = BUSY;
           remained_cycles_at_busy_state += load_latency + 1;
           break;
         case CMD_STORE:
-          memory_address = current_instruction.dst_index + current_instruction.src2_index_imm;
-          SIM_MemDataWrite(memory_address, current_instruction.src1_index);
+          memory_address = 4 * registers_table.reg[current_instruction.dst_index] + current_instruction.src2_index_imm;
+
+          SIM_MemDataWrite(memory_address, registers_table.reg[current_instruction.src1_index]);
+
           state = BUSY;
           remained_cycles_at_busy_state += store_latency + 1;
           break;
@@ -121,7 +124,7 @@ public:
     bool first_execution;
     unsigned total_num_of_cycles;
     unsigned total_num_of_instructions;
-
+    // TODO ADD OVERHEAD ADDITION FROM IMAGE FILE AND NOT 1 
     ThreadsTable(configuration_t configuration)
     {
       this->load_latency = SIM_GetLoadLat();
@@ -133,7 +136,7 @@ public:
       this->program_done = false;
       this->first_execution = true;
       this->total_num_of_cycles = 0;
-      this->previous_executed_thread_index = 0;
+      this->previous_executed_thread_index = -1;
       threads = new Thread[num_of_threads];
       initialize_threads_parameters();
     }
@@ -142,24 +145,53 @@ public:
     {
       bool found_thread_for_execution = false;
       unsigned thread_index_for_execute = 0;
+      bool core_in_idle_state = false;
+
       while(!program_done)
       {    
+
         get_thread_index_for_execution(&thread_index_for_execute, &found_thread_for_execution);
-        
+        if ((previous_executed_thread_index != thread_index_for_execute) & !core_in_idle_state & configuration == BLOCK)
+        {
+          // context switch overhead
+          total_num_of_cycles++;
+        }
+    
         if (found_thread_for_execution)
         {
           execute_instruction(thread_index_for_execute);
+          previous_executed_thread_index = thread_index_for_execute;
         }
-    
-        
+         core_in_idle_state =  is_core_idle();
+
+
         update_threads_state();
         is_program_done(&program_done);
+
         total_num_of_cycles++;
+                first_execution = false;
+
+
       }
 
       
     }
 
+    bool is_core_idle(void)
+    {
+      bool core_is_idle = true;
+
+      for (unsigned thread_index = 0; thread_index < num_of_threads ; ++thread_index)
+      {
+
+        if (IDLE == threads[thread_index].state)
+        {
+          core_is_idle = false;
+          break;
+        }
+      }
+      return core_is_idle;
+    }
     void execute_instruction(unsigned thread_index_for_execute)
     {
       threads[thread_index_for_execute].execute_instruction();
@@ -194,40 +226,81 @@ public:
       unsigned candidate_thread_index = 0;
       unsigned num_of_searched_threads = 0;
       *found_thread_for_execution = false;
-      if (first_execution)
-      {
-        *thread_index_for_execute = 0;
-        first_execution = false;
-        *found_thread_for_execution = true;
-      }
-      else if (FINE == configuration)
-      {
-        candidate_thread_index = (previous_executed_thread_index + 1) % num_of_threads;
 
-        for (num_of_searched_threads = 0; num_of_searched_threads < num_of_threads ; ++num_of_searched_threads)
+  
+      if (FINE == configuration)
+      {
+        if (first_execution)
+          {
+            *thread_index_for_execute = 0;
+            *found_thread_for_execution = true;
+            
+          }
+        else
         {
+          candidate_thread_index = (previous_executed_thread_index + 1) % num_of_threads;
+
+          for (num_of_searched_threads = 0; num_of_searched_threads < num_of_threads ; ++num_of_searched_threads)
+          {
+            if (IDLE != threads[candidate_thread_index].state)
+            {
+              candidate_thread_index = (candidate_thread_index + 1) % num_of_threads;
+            }
+            else
+            {
+              *found_thread_for_execution = true;
+              break;
+            }
+          }
+          
+          if (*found_thread_for_execution)
+          {
+            *thread_index_for_execute = candidate_thread_index;
+          }
+   
+        }
+      }
+      else if (BLOCK == configuration)
+      {
+        if (first_execution)
+        {
+          *thread_index_for_execute = 0;
+          *found_thread_for_execution = true;
+        }
+        else
+        {
+          candidate_thread_index = previous_executed_thread_index;
+
           if (IDLE != threads[candidate_thread_index].state)
           {
-            candidate_thread_index = (candidate_thread_index + 1) % num_of_threads;
+            for (num_of_searched_threads = 0; num_of_searched_threads < num_of_threads ; ++num_of_searched_threads)
+            {
+              if (IDLE != threads[candidate_thread_index].state)
+              {
+                candidate_thread_index = (candidate_thread_index + 1) % num_of_threads;
+              }
+              else
+              {
+                *found_thread_for_execution = true;
+                break;
+              }
+            }
           }
           else
           {
             *found_thread_for_execution = true;
-            break;
           }
         }
-        
+
+
         if (*found_thread_for_execution)
         {
           *thread_index_for_execute = candidate_thread_index;
-          previous_executed_thread_index = candidate_thread_index;
         }
-        else
-        {
-          // TODO
-        }
-      }
      
+
+      }
+
     }
 
     void is_program_done(bool * program_done)
@@ -305,22 +378,12 @@ public:
  
     ~ThreadsTable() {};
 };
-ThreadsTable * threads_table = NULL;
 
-void CORE_BlockedMT()
-{
-  threads_table = new ThreadsTable(FINE);
-  threads_table->execute_program();
-}
 
-void CORE_FinegrainedMT() {
-}
+ThreadsTable * threads_table_fine = NULL;
+ThreadsTable * threads_table_block = NULL;
 
-double CORE_BlockedMT_CPI(){
-	return 0;
-}
-
-double CORE_FinegrainedMT_CPI()
+double get_cpi(ThreadsTable * threads_table)
 {
   unsigned total_num_of_instructions = 0;
   double cycles_per_instruction = 0;
@@ -335,17 +398,45 @@ double CORE_FinegrainedMT_CPI()
 	return cycles_per_instruction;
 }
 
-void CORE_BlockedMT_CTX(tcontext* context, int threadid) {
-}
-
-void CORE_FinegrainedMT_CTX(tcontext* context, int threadid) 
+void assign_context(tcontext* context, int threadid, ThreadsTable * threads_table)
 {
-
   unsigned register_index = 0;
 
   for(register_index = 0; register_index < NUM_OF_REGISTERS; ++register_index)
   {
     context[threadid].reg[register_index] = threads_table->threads[threadid].registers_table.reg[register_index];
   }
-  
+}
+
+
+void CORE_BlockedMT()
+{
+  threads_table_block = new ThreadsTable(BLOCK);
+  threads_table_block->execute_program();
+}
+
+void CORE_FinegrainedMT() 
+{
+  threads_table_fine = new ThreadsTable(FINE);
+  threads_table_fine->execute_program();
+}
+
+double CORE_BlockedMT_CPI()
+{
+  return get_cpi(threads_table_block);
+}
+
+double CORE_FinegrainedMT_CPI()
+{
+  return get_cpi(threads_table_fine);
+}
+
+void CORE_BlockedMT_CTX(tcontext* context, int threadid) 
+{
+  assign_context(context, threadid, threads_table_block);
+}
+
+void CORE_FinegrainedMT_CTX(tcontext* context, int threadid) 
+{
+  assign_context(context, threadid, threads_table_fine);
 }
