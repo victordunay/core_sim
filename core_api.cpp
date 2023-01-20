@@ -154,7 +154,7 @@ public:
         {
           get_thread_index_for_execution(&thread_index_for_execute, &found_thread_for_execution);
           
-          if ((previous_executed_thread_index != thread_index_for_execute) & !core_in_idle_state & configuration == BLOCK)
+          if ((previous_executed_thread_index != thread_index_for_execute) & (!core_in_idle_state) & (configuration == BLOCK))
           {
             switch_context_is_required = true;
           }
