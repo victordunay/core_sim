@@ -146,35 +146,43 @@ public:
       bool found_thread_for_execution = false;
       unsigned thread_index_for_execute = 0;
       bool core_in_idle_state = false;
+      bool switch_context_is_required = false;
 
       while(!program_done)
-      {    
-
-        get_thread_index_for_execution(&thread_index_for_execute, &found_thread_for_execution);
-        if ((previous_executed_thread_index != thread_index_for_execute) & !core_in_idle_state & configuration == BLOCK)
+      {  
+        if (!switch_context_is_required)
         {
-          // context switch overhead
-          total_num_of_cycles++;
+          get_thread_index_for_execution(&thread_index_for_execute, &found_thread_for_execution);
+          
+          if ((previous_executed_thread_index != thread_index_for_execute) & !core_in_idle_state & configuration == BLOCK)
+          {
+            switch_context_is_required = true;
+          }
         }
-    
-        if (found_thread_for_execution)
+        else
+        {
+          switch_context_is_required = false;
+        }
+
+        if (found_thread_for_execution & !switch_context_is_required)
         {
           execute_instruction(thread_index_for_execute);
           previous_executed_thread_index = thread_index_for_execute;
         }
-         core_in_idle_state =  is_core_idle();
 
-
-        update_threads_state();
+        core_in_idle_state =  is_core_idle();
         is_program_done(&program_done);
-
-        total_num_of_cycles++;
-                first_execution = false;
-
-
+        first_execution = false;
+        update_threads_state();
+        if (switch_context_is_required)
+        {
+          total_num_of_cycles += switch_cycles_overhead;
+        }
+        else
+        {
+          total_num_of_cycles++;
+        }
       }
-
-      
     }
 
     bool is_core_idle(void)
@@ -206,6 +214,7 @@ public:
         *get_total_num_of_instructions += threads[thread_index].num_of_executed_instructions;
       }
     }
+
     void update_threads_state(void)
     {
       for (unsigned thread_index = 0; thread_index < num_of_threads ; ++thread_index)
@@ -292,15 +301,11 @@ public:
           }
         }
 
-
         if (*found_thread_for_execution)
         {
           *thread_index_for_execute = candidate_thread_index;
         }
-     
-
       }
-
     }
 
     void is_program_done(bool * program_done)
