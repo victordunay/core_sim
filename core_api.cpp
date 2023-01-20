@@ -154,7 +154,7 @@ public:
         {
           get_thread_index_for_execution(&thread_index_for_execute, &found_thread_for_execution);
           
-          if ((previous_executed_thread_index != thread_index_for_execute) & (!core_in_idle_state) & (configuration == BLOCK))
+          if ((previous_executed_thread_index != thread_index_for_execute) & (configuration == BLOCK) & (!first_execution))
           {
             switch_context_is_required = true;
           }
@@ -174,6 +174,8 @@ public:
         is_program_done(&program_done);
         first_execution = false;
         update_threads_state();
+
+
         if (switch_context_is_required)
         {
           total_num_of_cycles += switch_cycles_overhead;
@@ -182,6 +184,7 @@ public:
         {
           total_num_of_cycles++;
         }
+    
       }
     }
 
